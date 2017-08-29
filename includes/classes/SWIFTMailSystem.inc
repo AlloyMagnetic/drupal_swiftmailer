@@ -55,36 +55,49 @@ class SWIFTMailSystem implements MailSystemInterface {
         }
       }
 
-      // Process any images specified by 'image:' which are to be added later
-      // in the process. All we do here is to alter the message so that image
+      // Process any images specified by 'image:' or images inserted inline
+      // relative to domain (starting with a slash) and ending .gif, .png, .jpg
+      // which are to be added later in the process.
+      // All we do here is to alter the message so that image
       // paths are replaced with cid's. Each image gets added to the array
       // which keeps track of which images to embed in the e-mail.
-      $embeddable_images = array();
+      $patterns = array(
+        '/"(image:[^"]+)"/',
+        '/src="(\/[^"]+\.gif)"/i',
+        '/src="(\/[^"]+\.jpg)"/i',
+        '/src="(\/[^"]+\.png)"/i',
+      );
       $processed_images = array();
-      preg_match_all('/"image:([^"]+)"/', $message['body'], $embeddable_images);
-      for ($i = 0; $i < count($embeddable_images[0]); $i++) {
-        $image_id = $embeddable_images[0][$i];
+      foreach ($patterns as $pattern) {
+        $embeddable_images = array();
+        preg_match_all($pattern, $message['body'], $embeddable_images);
+        for ($i = 0; $i < count($embeddable_images[0]); $i++) {
+          $image_id = $embeddable_images[1][$i];
+          $image_uri = $embeddable_images[1][$i];
+          if (isset($processed_images[$image_uri])) {
+            continue;
+          }
+          $image_path = $image_uri;
+          $image_path = trim($image_path);
+          if (strpos($image_path, 'image:') === 0) {
+            $image_path = substr($image_path, 6);
+          }
 
-        if (isset($processed_images[$image_id])) {
-          continue;
+          $image_name = basename($image_path);
+
+          if (drupal_substr($image_path, 0, 1) == '/') {
+            $image_path = drupal_substr($image_path, 1);
+          }
+
+          $image = new stdClass();
+          $image->uri = $image_path;
+          $image->filename = $image_name;
+          $image->filemime = file_get_mimetype($image_path);
+          $image->cid = rand(0, 9999999999);
+          $message['params']['images'][] = $image;
+          $message['body'] = str_replace($image_id, 'cid:' . $image->cid, $message['body']);
+          $processed_images[$image_id] = 1;
         }
-
-        $image_path = trim($embeddable_images[1][$i]);
-        $image_name = basename($image_path);
-
-        if (drupal_substr($image_path, 0, 1) == '/') {
-          $image_path = drupal_substr($image_path, 1);
-        }
-
-        $image = new stdClass();
-        $image->uri = $image_path;
-        $image->filename = $image_name;
-        $image->filemime = file_get_mimetype($image_path);
-        $image->cid = rand(0, 9999999999);
-        $message['params']['images'][] = $image;
-        $message['body'] = preg_replace($image_id, 'cid:' . $image->cid, $message['body']);
-        $processed_images[$image_id] = 1;
-
       }
 
       return $message;
